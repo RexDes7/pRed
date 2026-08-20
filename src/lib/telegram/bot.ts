@@ -5,6 +5,10 @@ import { db } from '@/lib/db'
 export const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || ''
 
 let botInstance: Bot | null = null
+// grammY requires `bot.init()` (which calls getMe) before `bot.handleUpdate()`
+// because it needs the bot's username to detect commands like /start.
+// We cache the init promise so warm invocations on Vercel reuse it.
+let botInitPromise: Promise<void> | null = null
 
 export function getBot(): Bot | null {
   if (!BOT_TOKEN) return null
@@ -17,6 +21,20 @@ export function getBot(): Bot | null {
 
 export function isBotConfigured(): boolean {
   return Boolean(BOT_TOKEN)
+}
+
+/** Lazily initialize the bot (fetches bot info via getMe). Cached per process. */
+export async function ensureBotInit(): Promise<void> {
+  const bot = getBot()
+  if (!bot) return
+  if (!botInitPromise) {
+    botInitPromise = bot.init().catch((e) => {
+      // Reset so the next call can retry
+      botInitPromise = null
+      throw e
+    })
+  }
+  await botInitPromise
 }
 
 /* ----------------------------- helpers ----------------------------- */
@@ -383,6 +401,9 @@ function registerHandlers(bot: Bot) {
 export async function handleUpdate(update: Update): Promise<void> {
   const bot = getBot()
   if (!bot) throw new Error('TELEGRAM_BOT_TOKEN is not configured')
+  // grammY requires the bot to be initialized (getMe called) before
+  // handleUpdate, otherwise it throws "Bot not initialized!".
+  await ensureBotInit()
   await bot.handleUpdate(update)
 }
 
