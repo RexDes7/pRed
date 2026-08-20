@@ -1,0 +1,90 @@
+// Prisma schema for the Gym Trainer Sales Bot
+// Deploy target: Vercel (serverless) + GitHub repo
+// DB: SQLite (dev). For production on Vercel, switch provider to "postgresql"
+// and set DATABASE_URL to a Vercel Postgres / Neon / Supabase connection string.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// Telegram user that has interacted with the bot.
+model BotUser {
+  id         String    @id @default(cuid())
+  telegramId String    @unique
+  username   String?
+  firstName  String?
+  lastName   String?
+  phone      String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  orders     Order[]
+  messages   Message[]
+}
+
+/// Sellable item: a course, a service (e.g. personal training) or a program.
+model Product {
+  id          String   @id @default(cuid())
+  /// 'course' | 'service' | 'program'
+  type        String
+  title       String
+  description String
+  /// Price in the smallest currency unit (kopecks/cents) to avoid floats.
+  /// Frontend divides by 100 to display.
+  price       Int
+  currency    String   @default("RUB")
+  duration    String?
+  imageUrl    String?
+  /// pipe-separated feature list, e.g. "8 видео|PDF план|чат поддержки"
+  features   String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  orders      Order[]
+}
+
+model Order {
+  id           String   @id @default(cuid())
+  userId       String
+  productId    String
+  /// 'new' | 'paid' | 'fulfilled' | 'cancelled'
+  status       String   @default("new")
+  amount       Int
+  customerNote String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  user         BotUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+}
+
+model Message {
+  id         String   @id @default(cuid())
+  userId     String
+  /// 'in' = from user, 'out' = from bot
+  direction  String
+  text       String
+  createdAt  DateTime @default(now())
+  user       BotUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Singleton-ish row (id = 'default') storing the bot configuration.
+model BotSettings {
+  id           String  @id @default(cuid())
+  trainerName  String  @default("Александр Петров")
+  welcomeText  String  @default("Привет! Я тренер по фитнесу. Помогу тебе выбрать курс, услугу или программу тренировок.")
+  aboutText    String  @default("Сертифицированный тренер с 8-летним стажем. Чемпион области по пауэрлифтингу 2022.")
+  paymentInfo  String  @default("Оплата на карту 2200 0000 0000 0000 (Сбербанк). После оплаты пришлите чек сюда.")
+  contactInfo  String  @default("Контакт: @trainer_bot_support")
+  adminChatId  String?
+  botUsername  String?
+  webhookUrl   String?
+}
