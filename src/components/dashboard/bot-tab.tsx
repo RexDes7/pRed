@@ -31,6 +31,16 @@ import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Separator } from '@/components/ui/separator'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
 import { apiFetch } from '@/lib/format'
 
@@ -111,6 +121,47 @@ export function BotTab() {
     },
     onError: (e: unknown) =>
       toast.error('Рассылка не удалась', {
+        description: (e as Error).message,
+      }),
+  })
+
+  const [resetOpen, setResetOpen] = React.useState<'messages' | 'full' | null>(null)
+
+  const clearMessages = useMutation({
+    mutationFn: () =>
+      apiFetch<{ deleted: { messages: number } }>('/api/messages', {
+        method: 'DELETE',
+      }),
+    onSuccess: (res) => {
+      toast.success('Переписка очищена', {
+        description: `Удалено сообщений: ${res.deleted.messages}`,
+      })
+      qc.invalidateQueries({ queryKey: ['users'] })
+      qc.invalidateQueries({ queryKey: ['stats'] })
+      setResetOpen(null)
+    },
+    onError: (e: unknown) =>
+      toast.error('Не удалось очистить', {
+        description: (e as Error).message,
+      }),
+  })
+
+  const fullReset = useMutation({
+    mutationFn: () =>
+      apiFetch<{ deleted: { users: number } }>('/api/messages?full=true', {
+        method: 'DELETE',
+      }),
+    onSuccess: (res) => {
+      toast.success('Полный сброс выполнен', {
+        description: `Удалено пользователей: ${res.deleted.users} (вместе с заказами и сообщениями)`,
+      })
+      qc.invalidateQueries({ queryKey: ['users'] })
+      qc.invalidateQueries({ queryKey: ['orders'] })
+      qc.invalidateQueries({ queryKey: ['stats'] })
+      setResetOpen(null)
+    },
+    onError: (e: unknown) =>
+      toast.error('Не удалось выполнить сброс', {
         description: (e as Error).message,
       }),
   })
@@ -354,6 +405,92 @@ export function BotTab() {
           </CardFooter>
         </Card>
       </div>
+
+      {/* Data management */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <AlertTriangle className="size-4 text-amber-500" />
+            Управление данными
+          </CardTitle>
+          <CardDescription>
+            Очистка истории переписки в админке. Сообщения в Telegram-клиенте
+            остаются — бот их не контролирует.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Очистить переписку</p>
+              <p className="text-xs text-muted-foreground">
+                Удалит все сохранённые сообщения бота с клиентами. Заказы и профили клиентов сохранятся.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              onClick={() => setResetOpen('messages')}
+              disabled={clearMessages.isPending || fullReset.isPending}
+            >
+              <Trash2 className="size-4" />
+              Очистить сообщения
+            </Button>
+          </div>
+          <Separator className="my-4" />
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-destructive">Полный сброс</p>
+              <p className="text-xs text-muted-foreground">
+                Удалит <span className="font-medium">всё</span>: клиентов, заказы и сообщения. Полезно перед стартом продаж.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => setResetOpen('full')}
+              disabled={clearMessages.isPending || fullReset.isPending}
+            >
+              <AlertTriangle className="size-4" />
+              Полный сброс
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <AlertDialog open={!!resetOpen} onOpenChange={(v) => !v && setResetOpen(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {resetOpen === 'full' ? 'Полный сброс данных?' : 'Очистить переписку?'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {resetOpen === 'full'
+                ? 'Это удалит ВСЕХ клиентов, все заказы и все сообщения без возможности восстановления. Бот останется работать — новые клиенты смогут писать /start.'
+                : 'Это удалит все сохранённые сообщения из админ-панели. Заказы и клиенты сохранятся. В Telegram-клиенте сообщения останутся видны.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={clearMessages.isPending || fullReset.isPending}>
+              Отмена
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault()
+                if (resetOpen === 'full') fullReset.mutate()
+                else clearMessages.mutate()
+              }}
+              disabled={clearMessages.isPending || fullReset.isPending}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              {clearMessages.isPending || fullReset.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Trash2 className="size-4" />
+              )}
+              {resetOpen === 'full' ? 'Удалить всё' : 'Очистить'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Deployment instructions */}
       <Card>

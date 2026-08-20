@@ -4,10 +4,12 @@ import * as React from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
+  CheckCircle2,
   ChevronDown,
   ClipboardList,
   Loader2,
   MoreHorizontal,
+  XCircle,
 } from 'lucide-react'
 import {
   Card,
@@ -100,12 +102,24 @@ export function OrdersTab() {
 
   const updateMutation = useMutation({
     mutationFn: ({ id, status }: { id: string; status: OrderStatus }) =>
-      apiFetch<{ order: Order }>(`/api/orders/${id}`, {
+      apiFetch<{ order: Order; notify?: { ok: boolean; error?: string } }>(`/api/orders/${id}`, {
         method: 'PATCH',
         body: JSON.stringify({ status }),
       }),
-    onSuccess: (_data, vars) => {
-      toast.success(`Статус изменён: ${ORDER_STATUS_SHORT[vars.status]}`)
+    onSuccess: (data, vars) => {
+      const isNotifyStatus =
+        vars.status === 'paid' || vars.status === 'cancelled' || vars.status === 'fulfilled'
+      if (isNotifyStatus) {
+        if (data?.notify?.ok) {
+          toast.success(`Статус: ${ORDER_STATUS_SHORT[vars.status]} — клиент уведомлён в Telegram`)
+        } else {
+          toast.warning(`Статус: ${ORDER_STATUS_SHORT[vars.status]}`, {
+            description: `Клиент не уведомлён: ${data?.notify?.error || 'бот не настроен'}`,
+          })
+        }
+      } else {
+        toast.success(`Статус изменён: ${ORDER_STATUS_SHORT[vars.status]}`)
+      }
       qc.invalidateQueries({ queryKey: ['orders'] })
       qc.invalidateQueries({ queryKey: ['stats'] })
     },
@@ -251,8 +265,29 @@ export function OrdersTab() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuLabel>Статус заказа</DropdownMenuLabel>
+                            <DropdownMenuLabel>Действия (с уведомлением клиента)</DropdownMenuLabel>
+                            <DropdownMenuItem
+                              onClick={() =>
+                                updateMutation.mutate({ id: o.id, status: 'paid' })
+                              }
+                              disabled={o.status === 'paid' || o.status === 'fulfilled' || o.status === 'cancelled'}
+                              className="gap-2 text-emerald-600 dark:text-emerald-400"
+                            >
+                              <CheckCircle2 className="size-4" />
+                              💳 Подтвердить оплату
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() =>
+                                updateMutation.mutate({ id: o.id, status: 'cancelled' })
+                              }
+                              disabled={o.status === 'cancelled' || o.status === 'fulfilled'}
+                              className="gap-2 text-destructive"
+                            >
+                              <XCircle className="size-4" />
+                              ❌ Отказать клиенту
+                            </DropdownMenuItem>
                             <DropdownMenuSeparator />
+                            <DropdownMenuLabel>Сменить статус</DropdownMenuLabel>
                             {STATUSES.map((s) => (
                               <DropdownMenuItem
                                 key={s}

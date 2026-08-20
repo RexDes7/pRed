@@ -37,6 +37,25 @@ export async function ensureBotInit(): Promise<void> {
   await botInitPromise
 }
 
+/* ----------------------------- markdown + base url helpers ----------------------------- */
+
+/** Escape special characters for Telegram legacy Markdown (parse_mode: 'Markdown').
+ * User-provided text (contactInfo, trainerName, product title, etc.) can contain
+ * `_`, `*`, `[`, `]`, `` ` `` which break Markdown parsing and make the bot silently
+ * fail to answer. */
+export function escapeMarkdown(text: string | null | undefined): string {
+  if (!text) return ''
+  return String(text).replace(/([_*[\]`])/g, '\\$1')
+}
+
+// Set per-request from the webhook route so photos resolve to absolute URLs even
+// when NEXT_PUBLIC_APP_URL is not configured on Vercel.
+let currentBaseUrl = ''
+
+export function setBaseUrl(url: string): void {
+  currentBaseUrl = url ? url.replace(/\/$/, '') : ''
+}
+
 /* ----------------------------- helpers ----------------------------- */
 
 const TYPE_LABELS: Record<string, string> = {
@@ -97,12 +116,13 @@ async function getSettings() {
 /**
  * Telegram requires absolute public URLs for photos.
  * Relative paths (served from /public on Vercel) are resolved using the
- * configured APP_URL / NEXT_PUBLIC_APP_URL env var.
+ * per-request base URL (set by webhook route) or the NEXT_PUBLIC_APP_URL env var.
  */
 function resolvePhotoUrl(imageUrl: string | null): string | null {
   if (!imageUrl) return null
   if (/^https?:\/\//i.test(imageUrl)) return imageUrl
   const base =
+    currentBaseUrl ||
     process.env.NEXT_PUBLIC_APP_URL ||
     process.env.APP_URL ||
     ''
@@ -201,13 +221,13 @@ function registerHandlers(bot: Bot) {
     const features = product.features
       ? product.features
           .split('|')
-          .map((f) => `✅ ${f}`)
+          .map((f) => `✅ ${escapeMarkdown(f)}`)
           .join('\n')
       : ''
     const caption =
-      `*${product.title}*\n\n` +
-      `${product.description}\n\n` +
-      `⏱ Длительность: ${product.duration || '—'}\n` +
+      `*${escapeMarkdown(product.title)}*\n\n` +
+      `${escapeMarkdown(product.description)}\n\n` +
+      `⏱ Длительность: ${escapeMarkdown(product.duration || '—')}\n` +
       `💵 Стоимость: *${formatPrice(product.price, product.currency)}*\n` +
       (features ? `\n${features}\n` : '')
     const kb = new InlineKeyboard()
@@ -248,7 +268,7 @@ function registerHandlers(bot: Bot) {
       .text('🏠 В меню', 'menu')
     const text =
       `🧾 *Оформление заказа*\n\n` +
-      `${product.title}\n` +
+      `${escapeMarkdown(product.title)}\n` +
       `Сумма: *${formatPrice(product.price, product.currency)}*\n\n` +
       `Нажмите «Подтвердить заказ» — мы создадим заказ и пришлём реквизиты.`
     await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: kb })
@@ -279,9 +299,9 @@ function registerHandlers(bot: Bot) {
     const shortId = order.id.slice(-6).toUpperCase()
     const text =
       `✅ *Заказ #${shortId} создан!*\n\n` +
-      `${product.title}\n` +
+      `${escapeMarkdown(product.title)}\n` +
       `Сумма: ${formatPrice(product.price, product.currency)}\n\n` +
-      `${settings?.paymentInfo || 'Реквизиты для оплаты будут высланы отдельно.'}\n\n` +
+      `${escapeMarkdown(settings?.paymentInfo || 'Реквизиты для оплаты будут высланы отдельно.')}\n\n` +
       `После оплаты пришлите чек сообщением сюда. Статус заказа можно посмотреть в «Мои заказы».`
     const kb = new InlineKeyboard()
       .text('📦 Мои заказы', 'myorders')
@@ -302,7 +322,7 @@ function registerHandlers(bot: Bot) {
           settings.adminChatId,
           `🔔 *Новый заказ #${shortId}*\n\n` +
             `${clientLine}\n` +
-            `🛒 Товар: ${product.title}\n` +
+            `🛒 Товар: ${escapeMarkdown(product.title)}\n` +
             `💵 Сумма: ${formatPrice(product.price, product.currency)}\n` +
             `📅 ${new Date().toLocaleString('ru-RU')}`,
           { parse_mode: 'Markdown' },
@@ -340,7 +360,7 @@ function registerHandlers(bot: Bot) {
     const lines = orders
       .map((o) => {
         const shortId = o.id.slice(-6).toUpperCase()
-        return `#${shortId} • ${o.product.title}\n   ${formatPrice(
+        return `#${shortId} • ${escapeMarkdown(o.product.title)}\n   ${formatPrice(
           o.amount,
           o.product.currency,
         )} — ${STATUS_LABELS[o.status] || o.status}`
@@ -359,7 +379,7 @@ function registerHandlers(bot: Bot) {
     const settings = await getSettings()
     const kb = new InlineKeyboard().text('🏠 В меню', 'menu')
     await ctx.reply(
-      `💪 *${settings?.trainerName || 'Тренер'}*\n\n${settings?.aboutText || ''}`,
+      `💪 *${escapeMarkdown(settings?.trainerName || 'Тренер')}*\n\n${escapeMarkdown(settings?.aboutText || '')}`,
       { parse_mode: 'Markdown', reply_markup: kb },
     )
     await ctx.answerCallbackQuery()
@@ -369,8 +389,9 @@ function registerHandlers(bot: Bot) {
   bot.callbackQuery('support', async (ctx) => {
     const settings = await getSettings()
     const kb = new InlineKeyboard().text('🏠 В меню', 'menu')
+    // Escape user-provided contactInfo — `_` in usernames like @rlc_w would break Markdown
     await ctx.reply(
-      `💬 *Поддержка*\n\n${settings?.contactInfo || 'Свяжитесь с нами в Telegram.'}`,
+      `💬 *Поддержка*\n\n${escapeMarkdown(settings?.contactInfo || 'Свяжитесь с нами в Telegram.')}`,
       { parse_mode: 'Markdown', reply_markup: kb },
     )
     await ctx.answerCallbackQuery()
@@ -398,9 +419,11 @@ function registerHandlers(bot: Bot) {
 
 /* ----------------------------- public API ----------------------------- */
 
-export async function handleUpdate(update: Update): Promise<void> {
+export async function handleUpdate(update: Update, baseUrl?: string): Promise<void> {
   const bot = getBot()
   if (!bot) throw new Error('TELEGRAM_BOT_TOKEN is not configured')
+  // Per-request base URL so photos resolve even without NEXT_PUBLIC_APP_URL.
+  if (baseUrl) setBaseUrl(baseUrl)
   // grammY requires the bot to be initialized (getMe called) before
   // handleUpdate, otherwise it throws "Bot not initialized!".
   await ensureBotInit()
@@ -476,4 +499,28 @@ export async function broadcastMessage(
     await new Promise((r) => setTimeout(r, 50))
   }
   return { sent, failed }
+}
+
+/** Send a message to a single bot user (by internal userId). Used by the admin
+ * dashboard to notify customers about order status changes (paid / cancelled). */
+export async function notifyUser(
+  userId: string,
+  text: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const bot = getBot()
+  if (!bot) return { ok: false, error: 'bot not configured' }
+  const user = await db.botUser.findUnique({
+    where: { id: userId },
+    select: { telegramId: true, id: true },
+  })
+  if (!user) return { ok: false, error: 'user not found' }
+  try {
+    await bot.api.sendMessage(user.telegramId, text, { parse_mode: 'Markdown' })
+    await db.message.create({
+      data: { userId: user.id, direction: 'out', text },
+    })
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
 }

@@ -20,8 +20,21 @@ export async function POST(req: Request) {
     )
   }
 
+  // Resolve the public base URL so the bot can build absolute photo URLs
+  // even when NEXT_PUBLIC_APP_URL is not configured on Vercel.
+  const host =
+    req.headers.get('x-forwarded-host') || req.headers.get('host') || ''
+  const proto = (req.headers.get('x-forwarded-proto') || 'https')
+    .split(',')[0]
+    .trim()
+  const baseUrl =
+    process.env.NEXT_PUBLIC_APP_URL || (host ? `${proto}://${host}` : '')
+
   try {
-    await handleUpdate(update as Parameters<typeof handleUpdate>[0])
+    await handleUpdate(
+      update as Parameters<typeof handleUpdate>[0],
+      baseUrl,
+    )
   } catch (e) {
     console.error('[telegram webhook]', e)
     // Return 200 anyway so Telegram does not retry forever
