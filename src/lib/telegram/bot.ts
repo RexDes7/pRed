@@ -138,6 +138,84 @@ function resolvePhotoUrl(imageUrl: string | null): string | null {
   return `${base.replace(/\/$/, '')}${imageUrl}`
 }
 
+/* -------- edit-or-reply helpers (keep chat clean — edit instead of append) -------- */
+
+type ReplyOpts = { parse_mode?: 'Markdown' | 'HTML'; reply_markup?: unknown }
+
+/** Try to edit the current message text; if it's a photo (caption), edit caption;
+ * if that fails too (e.g. message too old / deleted), fall back to a new reply.
+ * This keeps the chat tidy — navigation replaces the previous message
+ * instead of appending a new one. */
+async function editOrReply(ctx: Ctx, text: string, opts: ReplyOpts = {}) {
+  try {
+    const msg = await ctx.editMessageText(text, opts as never)
+    if (msg) return
+  } catch {
+    // not a text message, try caption (photo message)
+  }
+  try {
+    const msg = await ctx.editMessageCaption({ caption: text, ...opts } as never)
+    if (msg) return
+  } catch {
+    // not a photo either
+  }
+  await ctx.reply(text, opts as never)
+}
+
+/** Same as editOrReply but for product detail which may include a photo.
+ * Tries editMessageMedia (if current message is media), then editMessageText,
+ * then editMessageCaption, then a new replyWithPhoto / reply as last resort. */
+async function editOrReplyProduct(
+  ctx: Ctx,
+  photoUrl: string | null,
+  caption: string,
+  kb: InlineKeyboard,
+) {
+  if (photoUrl) {
+    try {
+      const msg = await ctx.editMessageMedia(
+        { type: 'photo', media: photoUrl, caption, parse_mode: 'Markdown' },
+        { reply_markup: kb },
+      )
+      if (msg) return
+    } catch {
+      // current message isn't media
+    }
+  }
+  try {
+    const msg = await ctx.editMessageText(caption, {
+      parse_mode: 'Markdown',
+      reply_markup: kb,
+    })
+    if (msg) return
+  } catch {
+    // not text
+  }
+  try {
+    const msg = await ctx.editMessageCaption({
+      caption,
+      parse_mode: 'Markdown',
+      reply_markup: kb,
+    } as never)
+    if (msg) return
+  } catch {
+    // not caption
+  }
+  if (photoUrl) {
+    try {
+      await ctx.replyWithPhoto(photoUrl, {
+        caption,
+        parse_mode: 'Markdown',
+        reply_markup: kb,
+      })
+      return
+    } catch {
+      // photo failed
+    }
+  }
+  await ctx.reply(caption, { parse_mode: 'Markdown', reply_markup: kb })
+}
+
 /* ----------------------------- handlers ----------------------------- */
 
 function registerHandlers(bot: Bot) {
@@ -171,7 +249,7 @@ function registerHandlers(bot: Bot) {
   bot.callbackQuery('menu', async (ctx) => {
     const settings = await getSettings()
     const text = `${settings?.welcomeText || 'Главное меню'}\n\nВыберите раздел 👇`
-    await ctx.reply(text, { reply_markup: mainMenuKeyboard() })
+    await editOrReply(ctx, text, { reply_markup: mainMenuKeyboard() })
     await ctx.answerCallbackQuery()
   })
 
@@ -184,7 +262,7 @@ function registerHandlers(bot: Bot) {
       .text('📋 Программы', 'cat:program')
       .row()
       .text('🏠 В меню', 'menu')
-    await ctx.reply('🛒 *Каталог*\n\nВыберите категорию:', {
+    await editOrReply(ctx, '🛒 *Каталог*\n\nВыберите категорию:', {
       parse_mode: 'Markdown',
       reply_markup: kb,
     })
@@ -211,7 +289,7 @@ function registerHandlers(bot: Bot) {
         .row()
     }
     kb.text('⬅️ К категориям', 'cat:start').text('🏠 В меню', 'menu')
-    await ctx.reply(`📚 *${TYPE_LABELS[type]}* (${products.length})\n\nВыберите товар:`, {
+    await editOrReply(ctx, `📚 *${TYPE_LABELS[type]}* (${products.length})\n\nВыберите товар:`, {
       parse_mode: 'Markdown',
       reply_markup: kb,
     })
@@ -245,19 +323,7 @@ function registerHandlers(bot: Bot) {
       .text('🏠 В меню', 'menu')
 
     const photoUrl = resolvePhotoUrl(product.imageUrl)
-    try {
-      if (photoUrl) {
-        await ctx.replyWithPhoto(photoUrl, {
-          caption,
-          parse_mode: 'Markdown',
-          reply_markup: kb,
-        })
-      } else {
-        await ctx.reply(caption, { parse_mode: 'Markdown', reply_markup: kb })
-      }
-    } catch {
-      await ctx.reply(caption, { parse_mode: 'Markdown', reply_markup: kb })
-    }
+    await editOrReplyProduct(ctx, photoUrl, caption, kb)
     await ctx.answerCallbackQuery()
   })
 
@@ -279,7 +345,7 @@ function registerHandlers(bot: Bot) {
       `${escapeMarkdown(product.title)}\n` +
       `Сумма: *${formatPrice(product.price, product.currency)}*\n\n` +
       `Нажмите «Подтвердить заказ» — мы создадим заказ и пришлём реквизиты.`
-    await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: kb })
+    await editOrReply(ctx, text, { parse_mode: 'Markdown', reply_markup: kb })
     await ctx.answerCallbackQuery()
   })
 
@@ -351,7 +417,7 @@ function registerHandlers(bot: Bot) {
         .text('📦 Мои заказы', 'myorders')
         .text('🏠 В меню', 'menu')
     }
-    await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: kb })
+    await editOrReply(ctx, text, { parse_mode: 'Markdown', reply_markup: kb })
     await ctx.answerCallbackQuery({ text: 'Заказ создан ✅' })
 
     // notify admin
@@ -395,7 +461,8 @@ function registerHandlers(bot: Bot) {
       const kb = new InlineKeyboard()
         .text('🛒 В каталог', 'cat:start')
         .text('🏠 В меню', 'menu')
-      await ctx.reply(
+      await editOrReply(
+        ctx,
         '📦 У вас пока нет заказов.\n\nЗагляните в каталог — поможем выбрать!',
         { reply_markup: kb },
       )
@@ -412,7 +479,7 @@ function registerHandlers(bot: Bot) {
       })
       .join('\n\n')
     const kb = new InlineKeyboard().text('🏠 В меню', 'menu')
-    await ctx.reply(`📦 *Ваши заказы* (последние ${orders.length})\n\n${lines}`, {
+    await editOrReply(ctx, `📦 *Ваши заказы* (последние ${orders.length})\n\n${lines}`, {
       parse_mode: 'Markdown',
       reply_markup: kb,
     })
@@ -423,7 +490,8 @@ function registerHandlers(bot: Bot) {
   bot.callbackQuery('about', async (ctx) => {
     const settings = await getSettings()
     const kb = new InlineKeyboard().text('🏠 В меню', 'menu')
-    await ctx.reply(
+    await editOrReply(
+      ctx,
       `💪 *${escapeMarkdown(settings?.trainerName || 'Тренер')}*\n\n${escapeMarkdown(settings?.aboutText || '')}`,
       { parse_mode: 'Markdown', reply_markup: kb },
     )
@@ -435,7 +503,8 @@ function registerHandlers(bot: Bot) {
     const settings = await getSettings()
     const kb = new InlineKeyboard().text('🏠 В меню', 'menu')
     // Escape user-provided contactInfo — `_` in usernames like @rlc_w would break Markdown
-    await ctx.reply(
+    await editOrReply(
+      ctx,
       `💬 *Поддержка*\n\n${escapeMarkdown(settings?.contactInfo || 'Свяжитесь с нами в Telegram.')}`,
       { parse_mode: 'Markdown', reply_markup: kb },
     )
