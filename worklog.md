@@ -155,3 +155,23 @@ Stage Summary:
 - All 4 fixes deployed to https://p-red-ebon.vercel.app
 - Files changed: src/lib/telegram/bot.ts (escapeMarkdown, setBaseUrl, notifyUser, escaping in 7 handlers), src/app/api/telegram/webhook/route.ts (baseUrl from request), src/app/api/orders/[id]/route.ts (notifyUser on status change), src/components/dashboard/orders-tab.tsx (confirm/reject buttons + notify toast), src/app/api/messages/route.ts (NEW — DELETE for cleanup), src/components/dashboard/bot-tab.tsx (data management card + AlertDialog).
 - User next: test "Поддержка" button in Telegram, check product photos now appear, use new order action buttons, use "Управление данными" card to clear history.
+
+---
+Task ID: 5
+Agent: main
+Task: Improve payment UX — make payment details clickable (tap-to-copy) and support multiple payment methods instead of a single paymentInfo text field.
+
+Work Log:
+- Schema: added PaymentMethod model (type, label, value, hint, order, active). Old BotSettings.paymentInfo kept as legacy fallback.
+- DB: ran `prisma db push` against Neon — PaymentMethod table created. Ran `bun run db:seed` — added 3 demo methods (Сбербанк card, Тинькофф card, СБП by phone).
+- API: new routes — GET/POST /api/payment-methods, PATCH/DELETE /api/payment-methods/[id]. Validation for type ∈ {card, phone, crypto, upi, other}.
+- Bot: rewrote the confirm callback handler in src/lib/telegram/bot.ts. When payment methods exist, builds an inline keyboard with one `copy_text` button per active method (Telegram Bot API 7.11 — tapping copies the value to the user's clipboard). Each button shows "icon Label — копировать" and copies the raw value (card number / phone / wallet address). Hints shown as text lines in the message body. Falls back to settings.paymentInfo text when no methods configured.
+- Verified grammy 1.45.1 supports copy_text via @grammyjs/types/markup.d.ts — used kb.add({ text, copy_text: { text } }) without any cast.
+- Dashboard: new PaymentMethodsCard component in src/components/dashboard/payment-methods-card.tsx — full CRUD with dialog form (type select, label, value, hint, order, active switch), toggle-active switch, edit/delete with AlertDialog. Connected to Settings tab (placed outside the main form so buttons don't submit it).
+- Lint clean. Committed (7483b35) and pushed to GitHub. Vercel rebuilt. Verified /api/payment-methods on production returns 3 demo methods.
+
+Stage Summary:
+- Payment system upgraded: clients now see tappable buttons per method; tap → value copied to clipboard → paste into banking app. Multiple methods supported.
+- Admin can add/edit/delete/reorder/activate-deactivate methods from Settings tab → "Реквизиты для оплаты" card.
+- 3 demo methods (Сбербанк, Тинькофф, СБП) seeded — user can delete and add real ones.
+- Files: prisma/schema.prisma (+PaymentMethod), prisma/seed.ts (+paymentMethods), src/app/api/payment-methods/route.ts (NEW), src/app/api/payment-methods/[id]/route.ts (NEW), src/lib/telegram/bot.ts (confirm handler rewrite + PAYMENT_ICONS), src/components/dashboard/payment-methods-card.tsx (NEW), src/components/dashboard/settings-tab.tsx (mount PaymentMethodsCard).
