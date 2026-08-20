@@ -147,17 +147,29 @@ type ReplyOpts = { parse_mode?: 'Markdown' | 'HTML'; reply_markup?: unknown }
  * This keeps the chat tidy — navigation replaces the previous message
  * instead of appending a new one. */
 async function editOrReply(ctx: Ctx, text: string, opts: ReplyOpts = {}) {
-  try {
-    const msg = await ctx.editMessageText(text, opts as never)
-    if (msg) return
-  } catch {
-    // not a text message, try caption (photo message)
-  }
-  try {
-    const msg = await ctx.editMessageCaption({ caption: text, ...opts } as never)
-    if (msg) return
-  } catch {
-    // not a photo either
+  // If current message is media (photo/video), editMessageCaption would leave the
+  // photo visible — we want a clean text message, so delete + send a fresh reply.
+  const hasMedia = !!(
+    ctx.msg?.photo?.length ||
+    ctx.msg?.video ||
+    ctx.msg?.animation ||
+    ctx.msg?.document
+  )
+  if (!hasMedia) {
+    try {
+      const msg = await ctx.editMessageText(text, opts as never)
+      if (msg) return
+    } catch {
+      // edit failed (too old / not from bot) — fall through to delete + reply
+    }
+  } else {
+    // Media message — Telegram can't turn a photo into a text message via edit.
+    // Delete it so the new text message is clean.
+    try {
+      await ctx.deleteMessage()
+    } catch {
+      // can't delete (already deleted / no perms) — fall through to reply
+    }
   }
   await ctx.reply(text, opts as never)
 }
@@ -171,37 +183,33 @@ async function editOrReplyProduct(
   caption: string,
   kb: InlineKeyboard,
 ) {
+  const hasMedia = !!(
+    ctx.msg?.photo?.length ||
+    ctx.msg?.video ||
+    ctx.msg?.animation
+  )
+
   if (photoUrl) {
-    try {
-      const msg = await ctx.editMessageMedia(
-        { type: 'photo', media: photoUrl, caption, parse_mode: 'Markdown' },
-        { reply_markup: kb },
-      )
-      if (msg) return
-    } catch {
-      // current message isn't media
+    // Want to show a photo
+    if (hasMedia) {
+      // Current message is a photo — replace media in place
+      try {
+        const msg = await ctx.editMessageMedia(
+          { type: 'photo', media: photoUrl, caption, parse_mode: 'Markdown' },
+          { reply_markup: kb },
+        )
+        if (msg) return
+      } catch {
+        // editMedia failed — fall through to delete + replyWithPhoto
+      }
     }
-  }
-  try {
-    const msg = await ctx.editMessageText(caption, {
-      parse_mode: 'Markdown',
-      reply_markup: kb,
-    })
-    if (msg) return
-  } catch {
-    // not text
-  }
-  try {
-    const msg = await ctx.editMessageCaption({
-      caption,
-      parse_mode: 'Markdown',
-      reply_markup: kb,
-    } as never)
-    if (msg) return
-  } catch {
-    // not caption
-  }
-  if (photoUrl) {
+    // Current is text (or editMedia failed) — can't convert text→photo via edit,
+    // delete the old text message and send a fresh photo message.
+    try {
+      await ctx.deleteMessage()
+    } catch {
+      // ignore
+    }
     try {
       await ctx.replyWithPhoto(photoUrl, {
         caption,
@@ -210,8 +218,31 @@ async function editOrReplyProduct(
       })
       return
     } catch {
-      // photo failed
+      // photo failed — fall through to text reply below
     }
+  }
+
+  // No photoUrl (or photo failed) — show text
+  if (hasMedia) {
+    // Current is photo — Telegram can't turn photo into text via edit, delete + reply
+    try {
+      await ctx.deleteMessage()
+    } catch {
+      // ignore
+    }
+    await ctx.reply(caption, { parse_mode: 'Markdown', reply_markup: kb })
+    return
+  }
+
+  // Current is text — editMessageText in place
+  try {
+    const msg = await ctx.editMessageText(caption, {
+      parse_mode: 'Markdown',
+      reply_markup: kb,
+    })
+    if (msg) return
+  } catch {
+    // ignore
   }
   await ctx.reply(caption, { parse_mode: 'Markdown', reply_markup: kb })
 }
