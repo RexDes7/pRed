@@ -1,14 +1,14 @@
 // Prisma schema for the Gym Trainer Sales Bot
 // Deploy target: Vercel (serverless) + GitHub repo
-// DB: SQLite (dev). For production on Vercel, switch provider to "postgresql"
-// and set DATABASE_URL to a Vercel Postgres / Neon / Supabase connection string.
+// DB: PostgreSQL (Neon / Vercel Postgres / Supabase).
+// SQLite не подходит для Vercel — serverless-функции имеют read-only filesystem.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
