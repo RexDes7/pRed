@@ -137,3 +137,21 @@ Stage Summary:
 - Secrets audit: ✅ `.env` (with real TELEGRAM_BOT_TOKEN) is local-only and gitignored; ✅ `.env.example` in remote has only placeholder; ✅ token string not present in any committed file; ✅ GitHub PAT purged from `.git/config` after the single push.
 - NEXT STEPS for user: (1) import the repo on Vercel, (2) set env vars in Vercel (TELEGRAM_BOT_TOKEN, DATABASE_URL=Postgres, NEXT_PUBLIC_APP_URL, ADMIN_CHAT_ID), (3) switch provider in prisma/schema.prisma from "sqlite" to "postgresql", (4) run `bun run db:push && bun run db:seed` against the Postgres URL, (5) open the deployed site → "Бот" tab → paste Vercel URL → "Установить webhook", (6) message `/start` to the bot.
 - RECOMMENDATION: user may revoke the GitHub PAT at https://github.com/settings/tokens after Vercel import is done (Vercel uses its own GitHub app, not the PAT).
+
+---
+Task ID: 4
+Agent: main
+Task: Fix 4 user-reported issues: (1) "Поддержка" button hangs, (2) product posts in Telegram have no photos, (3) need order confirm/reject buttons with customer notification, (4) how to clear chat history.
+
+Work Log:
+- Diagnosed issue 1 via /api/settings: contactInfo = "Контакт: @rlc_w" — the `_` in usernames breaks Telegram legacy Markdown parsing, grammy throws, callback never answers. Added escapeMarkdown() helper in bot.ts escaping `_` `*` `[` `]` `` ` `` and applied to all user-provided text in Markdown replies (contactInfo, trainerName, aboutText, paymentInfo, product title/description/features/duration, order lines).
+- Diagnosed issue 2: product imageUrl = "/images/product-cut.jpg" (relative), images reachable on Vercel (HTTP 200), but resolvePhotoUrl returned null because NEXT_PUBLIC_APP_URL likely not set. Added per-request base URL fallback in webhook route: reads x-forwarded-host/x-forwarded-proto, passes to handleUpdate via setBaseUrl(). Photos now resolve even without env var.
+- Implemented issue 3: added notifyUser(userId, text) in bot.ts public API. PATCH /api/orders/[id] now builds a customer notification for paid/cancelled/fulfilled status changes and calls notifyUser (wrapped in try/catch so notification failure doesn't fail PATCH). Response includes {notify: {ok, error}}. Updated orders-tab.tsx: added "💳 Подтвердить оплату" and "❌ Отказать клиенту" items at top of status dropdown with icons and disabled-when-inappropriate logic. Toast now shows "клиент уведомлён в Telegram" or warning if notify failed.
+- Implemented issue 4: new DELETE /api/messages endpoint. Without query = clear all messages (history). With ?full=true = delete all BotUser (cascade removes orders + messages). Added "Управление данными" card in bot-tab with two buttons + AlertDialog confirmation. Noted in code + UI: Telegram client messages cannot be bulk-deleted by the bot (API limitation) — only admin-side history is cleared.
+- Lint clean. Committed (1d554b1) and pushed to GitHub (PAT used temporarily then removed). Vercel rebuilt automatically.
+- Verified production: /api/messages returns {"ok":true,"count":12} (new endpoint confirms redeploy), /api/telegram/status still healthy (configured=true, webhook correct, pending=0).
+
+Stage Summary:
+- All 4 fixes deployed to https://p-red-ebon.vercel.app
+- Files changed: src/lib/telegram/bot.ts (escapeMarkdown, setBaseUrl, notifyUser, escaping in 7 handlers), src/app/api/telegram/webhook/route.ts (baseUrl from request), src/app/api/orders/[id]/route.ts (notifyUser on status change), src/components/dashboard/orders-tab.tsx (confirm/reject buttons + notify toast), src/app/api/messages/route.ts (NEW — DELETE for cleanup), src/components/dashboard/bot-tab.tsx (data management card + AlertDialog).
+- User next: test "Поддержка" button in Telegram, check product photos now appear, use new order action buttons, use "Управление данными" card to clear history.
