@@ -175,3 +175,22 @@ Stage Summary:
 - Admin can add/edit/delete/reorder/activate-deactivate methods from Settings tab → "Реквизиты для оплаты" card.
 - 3 demo methods (Сбербанк, Тинькофф, СБП) seeded — user can delete and add real ones.
 - Files: prisma/schema.prisma (+PaymentMethod), prisma/seed.ts (+paymentMethods), src/app/api/payment-methods/route.ts (NEW), src/app/api/payment-methods/[id]/route.ts (NEW), src/lib/telegram/bot.ts (confirm handler rewrite + PAYMENT_ICONS), src/components/dashboard/payment-methods-card.tsx (NEW), src/components/dashboard/settings-tab.tsx (mount PaymentMethodsCard).
+
+---
+Task ID: 6
+Agent: main
+Task: Inline navigation — when the user taps an inline button, the bot should edit the existing message in place instead of appending a new one (avoid long chat thread).
+
+Work Log:
+- Added editOrReply(ctx, text, opts) helper in bot.ts: tries ctx.editMessageText first; if that throws (current message is a photo), tries ctx.editMessageCaption; if both fail (message too old / deleted / not from bot), falls back to ctx.reply. Keeps a single evolving message card.
+- Added editOrReplyProduct(ctx, photoUrl, caption, kb) helper: tries ctx.editMessageMedia (replace photo), then editMessageText, then editMessageCaption, then replyWithPhoto / reply as last resort. Handles transitions between text-only and photo messages seamlessly.
+- Replaced ctx.reply with editOrReply in 9 callback handlers: menu, cat:start, cat:(type), order:(id), confirm:(id) — both empty & list cases, myorders (no-orders + list), about, support.
+- Replaced the photo+caption block in prod:(id) with editOrReplyProduct — now a tap on a product replaces the current message (catalog list / previous product) with the new product's photo + caption + inline keyboard.
+- Kept ctx.reply in: /start, /help (first-time bot invocation — new message is appropriate), and message:text fallback (client sent arbitrary text — a new reply is appropriate).
+- Lint clean. Committed (7f47eec) and pushed to GitHub. Vercel rebuilt. Verified /api/telegram/status healthy (configured, webhook correct, pending=0, no errors).
+
+Stage Summary:
+- Bot navigation is now "single card" — tapping Каталог/Категория/Товар/Оформить/Подтвердить/Мои заказы/О тренере/Поддержка/В меню all edit the same message in place. Chat stays clean.
+- Only genuinely new user actions (/start, /help, sending free text) produce new messages.
+- Files changed: src/lib/telegram/bot.ts (+editOrReply, +editOrReplyProduct, 9 callback handlers rewritten, prod:(id) photo block replaced).
+- Note: editMessageText requires the message to be from the bot and <48h old — fallback to reply covers edge cases (deleted messages, very old navigation).
