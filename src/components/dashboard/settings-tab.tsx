@@ -28,6 +28,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Separator } from '@/components/ui/separator'
 import { apiFetch } from '@/lib/format'
+import { PaymentMethodsCard } from '@/components/dashboard/payment-methods-card'
 
 type Settings = {
   id: string
@@ -125,6 +126,7 @@ export function SettingsTab() {
   }
 
   return (
+    <div className="space-y-6">
     <form onSubmit={submit} className="space-y-6">
       <Card>
         <CardHeader>
@@ -280,5 +282,7 @@ export function SettingsTab() {
         </CardFooter>
       </Card>
     </form>
+    <PaymentMethodsCard />
+    </div>
   )
 }

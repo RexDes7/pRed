@@ -88,3 +88,22 @@ model BotSettings {
   botUsername  String?
   webhookUrl   String?
 }
+
+/// A payment method shown to clients as a "tap to copy" inline button.
+/// Multiple methods supported — client sees a keyboard with one button per method.
+model PaymentMethod {
+  id        String   @id @default(cuid())
+  /// 'card' | 'phone' | 'crypto' | 'upi' | 'other'
+  type      String   @default("card")
+  /// Short label, e.g. "Сбербанк", "Тинькофф", "USDT TRC20", "СБП по номеру"
+  label     String
+  /// The value the client copies to clipboard (card number, phone, wallet address)
+  value     String
+  /// Optional hint shown under the button (recipient name, network, etc.)
+  hint      String?
+  /// Display order (lower = higher up)
+  order     Int      @default(0)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

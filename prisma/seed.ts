@@ -71,6 +71,33 @@ const products = [
   },
 ]
 
+const paymentMethods = [
+  {
+    type: 'card',
+    label: 'Сбербанк',
+    value: '2202 2034 5678 9012',
+    hint: 'Получатель: Рафаэль А.',
+    order: 1,
+    active: true,
+  },
+  {
+    type: 'card',
+    label: 'Тинькофф',
+    value: '5536 9141 2345 6789',
+    hint: 'Получатель: Рафаэль А.',
+    order: 2,
+    active: true,
+  },
+  {
+    type: 'phone',
+    label: 'СБП по номеру телефона',
+    value: '+7 999 123-45-67',
+    hint: 'Любой банк → СБП. Получатель: Рафаэль А.',
+    order: 3,
+    active: true,
+  },
+]
+
 async function main() {
   // Settings singleton
   await db.botSettings.upsert({
@@ -89,7 +116,25 @@ async function main() {
     }
   }
 
-  console.log('Seed complete:', products.length, 'products')
+  // Payment methods — dedupe by (type + value)
+  for (const pm of paymentMethods) {
+    const existing = await db.paymentMethod.findFirst({
+      where: { type: pm.type, value: pm.value },
+    })
+    if (existing) {
+      await db.paymentMethod.update({ where: { id: existing.id }, data: pm })
+    } else {
+      await db.paymentMethod.create({ data: pm })
+    }
+  }
+
+  console.log(
+    'Seed complete:',
+    products.length,
+    'products,',
+    paymentMethods.length,
+    'payment methods',
+  )
 }
 
 main()

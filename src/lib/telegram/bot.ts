@@ -71,6 +71,14 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: '❌ Отменён',
 }
 
+const PAYMENT_ICONS: Record<string, string> = {
+  card: '💳',
+  phone: '📱',
+  crypto: '💎',
+  upi: '🔗',
+  other: '🔁',
+}
+
 export function formatPrice(price: number, currency: string): string {
   const value = (price / 100).toLocaleString('ru-RU', {
     minimumFractionDigits: price % 100 === 0 ? 0 : 2,
@@ -297,15 +305,52 @@ function registerHandlers(bot: Bot) {
     })
     const settings = await getSettings()
     const shortId = order.id.slice(-6).toUpperCase()
-    const text =
-      `✅ *Заказ #${shortId} создан!*\n\n` +
-      `${escapeMarkdown(product.title)}\n` +
-      `Сумма: ${formatPrice(product.price, product.currency)}\n\n` +
-      `${escapeMarkdown(settings?.paymentInfo || 'Реквизиты для оплаты будут высланы отдельно.')}\n\n` +
-      `После оплаты пришлите чек сообщением сюда. Статус заказа можно посмотреть в «Мои заказы».`
-    const kb = new InlineKeyboard()
-      .text('📦 Мои заказы', 'myorders')
-      .text('🏠 В меню', 'menu')
+
+    // Payment methods (new model) — one "tap to copy" inline button per method.
+    // Falls back to settings.paymentInfo text when none are configured.
+    const paymentMethods = await db.paymentMethod.findMany({
+      where: { active: true },
+      orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+    })
+
+    let text: string
+    let kb: InlineKeyboard
+
+    if (paymentMethods.length > 0) {
+      const lines = paymentMethods
+        .map((pm) => {
+          const icon = PAYMENT_ICONS[pm.type] || '🔁'
+          const detail = pm.hint ? ` — ${escapeMarkdown(pm.hint)}` : ''
+          return `${icon} *${escapeMarkdown(pm.label)}*${detail}`
+        })
+        .join('\n')
+      text =
+        `✅ *Заказ #${shortId} создан!*\n\n` +
+        `${escapeMarkdown(product.title)}\n` +
+        `Сумма: ${formatPrice(product.price, product.currency)}\n\n` +
+        `Выберите способ оплаты — нажмите кнопку, чтобы скопировать реквизит:\n\n${lines}\n\n` +
+        `После оплаты пришлите чек сообщением сюда. Статус — в «Мои заказы».`
+      kb = new InlineKeyboard()
+      for (const pm of paymentMethods) {
+        const icon = PAYMENT_ICONS[pm.type] || '🔁'
+        kb.add({
+          text: `${icon} ${pm.label} — копировать`,
+          copy_text: { text: pm.value },
+        }).row()
+      }
+      kb.text('📦 Мои заказы', 'myorders')
+      kb.text('🏠 В меню', 'menu')
+    } else {
+      text =
+        `✅ *Заказ #${shortId} создан!*\n\n` +
+        `${escapeMarkdown(product.title)}\n` +
+        `Сумма: ${formatPrice(product.price, product.currency)}\n\n` +
+        `${escapeMarkdown(settings?.paymentInfo || 'Реквизиты для оплаты будут высланы отдельно.')}\n\n` +
+        `После оплаты пришлите чек сообщением сюда. Статус заказа можно посмотреть в «Мои заказы».`
+      kb = new InlineKeyboard()
+        .text('📦 Мои заказы', 'myorders')
+        .text('🏠 В меню', 'menu')
+    }
     await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: kb })
     await ctx.answerCallbackQuery({ text: 'Заказ создан ✅' })
 
